@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
+use crate::expr::LeftDeepJoin;
 use crate::expr::{Expr, ProjectList, ProjectName, Relvar};
-use crate::{expr::LeftDeepJoin, statement::Statement};
 use spacetimedb_lib::identity::AuthCtx;
 use spacetimedb_lib::AlgebraicType;
 use spacetimedb_primitives::TableId;
@@ -17,7 +17,7 @@ use spacetimedb_sql_parser::{
 use super::{
     errors::{DuplicateName, TypingError, Unresolved, Unsupported},
     expr::RelExpr,
-    type_expr, type_proj, type_select, StatementCtx, StatementSource,
+    type_expr, type_proj, type_select,
 };
 
 /// The result of type checking and name resolution
@@ -162,21 +162,6 @@ pub fn parse_and_type_sub(sql: &str, tx: &impl SchemaView, auth: &AuthCtx) -> Ty
     let has_param = ast.has_parameter();
     let ast = ast.resolve_sender(auth.caller);
     expect_table_type(SubChecker::type_ast(ast, tx)?).map(|plan| (plan, has_param))
-}
-
-/// Type check a subscription query
-pub fn type_subscription(ast: SqlSelect, tx: &impl SchemaView) -> TypingResult<ProjectName> {
-    expect_table_type(SubChecker::type_ast(ast, tx)?)
-}
-
-/// Parse and type check a *subscription* query into a `StatementCtx`
-pub fn compile_sql_sub<'a>(sql: &'a str, tx: &impl SchemaView, auth: &AuthCtx) -> TypingResult<StatementCtx<'a>> {
-    let (plan, _) = parse_and_type_sub(sql, tx, auth)?;
-    Ok(StatementCtx {
-        statement: Statement::Select(ProjectList::Name(plan)),
-        sql,
-        source: StatementSource::Subscription,
-    })
 }
 
 /// Returns an error if the input type is not a table type or relvar

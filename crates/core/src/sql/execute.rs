@@ -205,7 +205,7 @@ pub fn run(
 
             // Evaluate the query
             let rows = execute_select_stmt(stmt, &DeltaTx::from(&*tx), &mut metrics, |plan| {
-                check_row_limit(&plan, db, &tx, |plan, tx| estimate_rows_scanned(tx, plan), &auth)?;
+                check_row_limit(&[&plan], db, &tx, |plan, tx| estimate_rows_scanned(tx, plan), &auth)?;
                 Ok(plan)
             })?;
 

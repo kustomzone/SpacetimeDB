@@ -7,6 +7,7 @@ use spacetimedb_execution::{
 use spacetimedb_expr::{
     check::{parse_and_type_sub, SchemaView},
     expr::ProjectList,
+    rls::resolve_views,
     statement::{parse_and_type_sql, Statement, DML},
 };
 use spacetimedb_lib::{identity::AuthCtx, metrics::ExecutionMetrics, ProductValue};
@@ -25,12 +26,12 @@ pub fn compile_subscription(
     sql: &str,
     tx: &impl SchemaView,
     auth: &AuthCtx,
-) -> Result<(ProjectPlan, TableId, Box<str>, bool)> {
+) -> Result<(Vec<ProjectPlan>, TableId, Box<str>, bool)> {
     if sql.len() > MAX_SQL_LENGTH {
         bail!("SQL query exceeds maximum allowed length: \"{sql:.120}...\"")
     }
 
-    let (plan, has_param) = parse_and_type_sub(sql, tx, auth)?;
+    let (plan, mut has_param) = parse_and_type_sub(sql, tx, auth)?;
 
     let Some(return_id) = plan.return_table_id() else {
         bail!("Failed to determine TableId for query")
@@ -40,9 +41,13 @@ pub fn compile_subscription(
         bail!("TableId `{return_id}` does not exist")
     };
 
-    let plan = compile_select(plan);
+    // Resolve any RLS filters
+    let plan_fragments = resolve_views(tx, plan, auth, &mut has_param)?
+        .into_iter()
+        .map(compile_select)
+        .collect();
 
-    Ok((plan, return_id, return_name, has_param))
+    Ok((plan_fragments, return_id, return_name, has_param))
 }
 
 /// A utility for parsing and type checking a sql statement

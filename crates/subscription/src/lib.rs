@@ -279,59 +279,62 @@ impl SubscriptionPlan {
     }
 
     /// Generate a plan for incrementally maintaining a subscription
-    pub fn compile(sql: &str, tx: &impl SchemaView, auth: &AuthCtx) -> Result<(Self, bool)> {
-        let (plan, return_id, return_name, has_param) = compile_subscription(sql, tx, auth)?;
+    pub fn compile(sql: &str, tx: &impl SchemaView, auth: &AuthCtx) -> Result<(Vec<Self>, bool)> {
+        let (plans, return_id, return_name, has_param) = compile_subscription(sql, tx, auth)?;
 
-        let mut ix_joins = true;
-        plan.visit(&mut |plan| match plan {
-            PhysicalPlan::IxJoin(IxJoin { lhs_field, .. }, _) => {
-                ix_joins = ix_joins && plan.index_on_field(&lhs_field.label, lhs_field.field_pos);
+        let mut subscriptions = vec![];
+
+        for plan in plans {
+            let mut ix_joins = true;
+            plan.visit(&mut |plan| match plan {
+                PhysicalPlan::IxJoin(IxJoin { lhs_field, .. }, _) => {
+                    ix_joins = ix_joins && plan.index_on_field(&lhs_field.label, lhs_field.field_pos);
+                }
+                PhysicalPlan::HashJoin(
+                    HashJoin {
+                        lhs_field, rhs_field, ..
+                    },
+                    _,
+                ) => {
+                    ix_joins = ix_joins && plan.index_on_field(&lhs_field.label, lhs_field.field_pos);
+                    ix_joins = ix_joins && plan.index_on_field(&rhs_field.label, rhs_field.field_pos);
+                }
+                _ => {}
+            });
+
+            if !ix_joins {
+                bail!("Subscriptions require indexes on join columns")
             }
-            PhysicalPlan::HashJoin(
-                HashJoin {
-                    lhs_field, rhs_field, ..
-                },
-                _,
-            ) => {
-                ix_joins = ix_joins && plan.index_on_field(&lhs_field.label, lhs_field.field_pos);
-                ix_joins = ix_joins && plan.index_on_field(&rhs_field.label, rhs_field.field_pos);
-            }
-            _ => {}
-        });
 
-        if !ix_joins {
-            bail!("Subscriptions require indexes on join columns")
-        }
+            let mut table_aliases = vec![];
+            let mut table_ids = vec![];
 
-        let mut table_aliases = vec![];
-        let mut table_ids = vec![];
+            plan.visit(&mut |plan| {
+                if let PhysicalPlan::TableScan(
+                    TableScan {
+                        schema,
+                        limit: None,
+                        delta: None,
+                    },
+                    alias,
+                ) = plan
+                {
+                    table_aliases.push(*alias);
+                    table_ids.push(schema.table_id);
+                }
+            });
 
-        plan.visit(&mut |plan| {
-            if let PhysicalPlan::TableScan(
-                TableScan {
-                    schema,
-                    limit: None,
-                    delta: None,
-                },
-                alias,
-            ) = plan
-            {
-                table_aliases.push(*alias);
-                table_ids.push(schema.table_id);
-            }
-        });
+            let fragments = Fragments::compile_from_plan(&plan, &table_aliases)?;
 
-        let fragments = Fragments::compile_from_plan(&plan, &table_aliases)?;
-
-        Ok((
-            Self {
+            subscriptions.push(Self {
                 return_id,
-                return_name,
+                return_name: return_name.clone(),
                 table_ids,
                 plan,
                 fragments,
-            },
-            has_param,
-        ))
+            });
+        }
+
+        Ok((subscriptions, has_param))
     }
 }

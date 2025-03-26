@@ -26,6 +26,14 @@ pub enum ProjectName {
 }
 
 impl ProjectName {
+    /// What is the name(alias) of the returned table?
+    pub fn return_name(&self) -> Option<&str> {
+        match self {
+            Self::None(input) => input.return_name(),
+            Self::Some(_, name) => Some(name.as_ref()),
+        }
+    }
+
     /// The [TableSchema] of the returned rows.
     /// Note this expression returns rows from a relvar.
     /// Hence it this method should never return [None].
@@ -126,7 +134,7 @@ impl ProjectList {
 }
 
 /// A logical relational expression
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RelExpr {
     /// A relvar or table reference
     RelVar(Relvar),
@@ -139,15 +147,43 @@ pub enum RelExpr {
 }
 
 /// A table reference
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Relvar {
+    /// The table schema of this relvar
     pub schema: Arc<TableSchema>,
+    /// The name of this relvar
     pub alias: Box<str>,
     /// Does this relvar represent a delta table?
     pub delta: Option<Delta>,
 }
 
 impl RelExpr {
+    /// Walks the plan tree and calls `f` on every op
+    pub fn visit(&self, f: &mut impl FnMut(&Self)) {
+        f(self);
+        match self {
+            Self::Select(lhs, _)
+            | Self::LeftDeepJoin(LeftDeepJoin { lhs, .. })
+            | Self::EqJoin(LeftDeepJoin { lhs, .. }, ..) => {
+                lhs.visit(f);
+            }
+            Self::RelVar(..) => {}
+        }
+    }
+
+    /// Walks the plan tree and calls `f` on every op
+    pub fn visit_mut(&mut self, f: &mut impl FnMut(&mut Self)) {
+        f(self);
+        match self {
+            Self::Select(lhs, _)
+            | Self::LeftDeepJoin(LeftDeepJoin { lhs, .. })
+            | Self::EqJoin(LeftDeepJoin { lhs, .. }, ..) => {
+                lhs.visit_mut(f);
+            }
+            Self::RelVar(..) => {}
+        }
+    }
+
     /// The number of fields this expression returns
     pub fn nfields(&self) -> usize {
         match self {
@@ -201,10 +237,20 @@ impl RelExpr {
     pub fn return_table_id(&self) -> Option<TableId> {
         self.return_table().map(|schema| schema.table_id)
     }
+
+    /// Does this expression return a single relvar?
+    /// If so, return its name(alias), otherwise return [None].
+    pub fn return_name(&self) -> Option<&str> {
+        match self {
+            Self::RelVar(Relvar { alias, .. }) => Some(alias.as_ref()),
+            Self::Select(input, _) => input.return_name(),
+            _ => None,
+        }
+    }
 }
 
 /// A left deep binary cross product
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LeftDeepJoin {
     /// The lhs is recursive
     pub lhs: Box<RelExpr>,
@@ -213,7 +259,7 @@ pub struct LeftDeepJoin {
 }
 
 /// A typed scalar expression
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expr {
     /// A binary expression
     BinOp(BinOp, Box<Expr>, Box<Expr>),
@@ -226,6 +272,30 @@ pub enum Expr {
 }
 
 impl Expr {
+    /// Walks the expression and calls `f` on every subexpression
+    pub fn visit(&self, f: &impl Fn(&Self)) {
+        f(self);
+        match self {
+            Self::BinOp(_, a, b) | Self::LogOp(_, a, b) => {
+                a.visit(f);
+                b.visit(f);
+            }
+            Self::Value(..) | Self::Field(..) => {}
+        }
+    }
+
+    /// Walks the expression and calls `f` on every subexpression
+    pub fn visit_mut(&mut self, f: &mut impl FnMut(&mut Self)) {
+        f(self);
+        match self {
+            Self::BinOp(_, a, b) | Self::LogOp(_, a, b) => {
+                a.visit_mut(f);
+                b.visit_mut(f);
+            }
+            Self::Value(..) | Self::Field(..) => {}
+        }
+    }
+
     /// A literal boolean value
     pub const fn bool(v: bool) -> Self {
         Self::Value(AlgebraicValue::Bool(v), AlgebraicType::Bool)
@@ -246,7 +316,7 @@ impl Expr {
 }
 
 /// A typed qualified field projection
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FieldProject {
     pub table: Box<str>,
     pub field: usize,

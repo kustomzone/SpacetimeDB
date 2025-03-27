@@ -80,10 +80,10 @@ impl ProjectName {
 /// ```
 #[derive(Debug)]
 pub enum ProjectList {
-    Name(ProjectName),
-    List(RelExpr, Vec<(Box<str>, FieldProject)>),
+    Name(Vec<ProjectName>),
+    List(Vec<RelExpr>, Vec<(Box<str>, FieldProject)>),
     Limit(Box<ProjectList>, u64),
-    Agg(RelExpr, AggType, Box<str>, AlgebraicType),
+    Agg(Vec<RelExpr>, AggType, Box<str>, AlgebraicType),
 }
 
 #[derive(Debug)]
@@ -97,7 +97,7 @@ impl ProjectList {
     /// If not, it projects a list of columns, so we return [None].
     pub fn return_table(&self) -> Option<&TableSchema> {
         match self {
-            Self::Name(project) => project.return_table(),
+            Self::Name(project) => project[0].return_table(),
             Self::Limit(input, _) => input.return_table(),
             Self::List(..) | Self::Agg(..) => None,
         }
@@ -108,7 +108,7 @@ impl ProjectList {
     /// If not, it projects a list of columns, so we return [None].
     pub fn return_table_id(&self) -> Option<TableId> {
         match self {
-            Self::Name(project) => project.return_table_id(),
+            Self::Name(project) => project[0].return_table_id(),
             Self::Limit(input, _) => input.return_table_id(),
             Self::List(..) | Self::Agg(..) => None,
         }
@@ -118,7 +118,7 @@ impl ProjectList {
     pub fn for_each_return_field(&self, mut f: impl FnMut(&str, &AlgebraicType)) {
         match self {
             Self::Name(input) => {
-                input.for_each_return_field(f);
+                input[0].for_each_return_field(f);
             }
             Self::Limit(input, _) => {
                 input.for_each_return_field(f);

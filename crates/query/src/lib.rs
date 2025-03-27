@@ -6,8 +6,8 @@ use spacetimedb_execution::{
 };
 use spacetimedb_expr::{
     check::{parse_and_type_sub, SchemaView},
-    expr::ProjectList,
-    rls::resolve_views,
+    expr::{AggType, ProjectList},
+    rls::{resolve_views, resolve_views_for_expr},
     statement::{parse_and_type_sql, Statement, DML},
 };
 use spacetimedb_lib::{identity::AuthCtx, metrics::ExecutionMetrics, ProductValue};
@@ -55,7 +55,54 @@ pub fn compile_sql_stmt(sql: &str, tx: &impl SchemaView, auth: &AuthCtx) -> Resu
     if sql.len() > MAX_SQL_LENGTH {
         bail!("SQL query exceeds maximum allowed length: \"{sql:.120}...\"")
     }
-    Ok(parse_and_type_sql(sql, tx, auth)?)
+
+    fn resolve_views_for_sql(expr: ProjectList, tx: &impl SchemaView, auth: &AuthCtx) -> Result<ProjectList> {
+        match expr {
+            ProjectList::Name(exprs) => {
+                let mut plan_fragments = vec![];
+                for expr in exprs {
+                    plan_fragments.extend(resolve_views(tx, expr, auth, &mut false)?);
+                }
+                Ok(ProjectList::Name(plan_fragments))
+            }
+            ProjectList::List(exprs, fields) => {
+                let mut plan_fragments = vec![];
+                for expr in exprs {
+                    plan_fragments.extend(resolve_views_for_expr(
+                        tx,
+                        expr,
+                        None,
+                        &mut 0,
+                        &mut vec![],
+                        &mut false,
+                        auth,
+                    )?);
+                }
+                Ok(ProjectList::List(plan_fragments, fields))
+            }
+            ProjectList::Limit(expr, n) => Ok(ProjectList::Limit(Box::new(resolve_views_for_sql(*expr, tx, auth)?), n)),
+            ProjectList::Agg(exprs, AggType::Count, name, ty) => {
+                let mut plan_fragments = vec![];
+                for expr in exprs {
+                    plan_fragments.extend(resolve_views_for_expr(
+                        tx,
+                        expr,
+                        None,
+                        &mut 0,
+                        &mut vec![],
+                        &mut false,
+                        auth,
+                    )?);
+                }
+                Ok(ProjectList::Agg(plan_fragments, AggType::Count, name, ty))
+            }
+        }
+    }
+
+    match parse_and_type_sql(sql, tx, auth)? {
+        stmt @ Statement::DML(_) => Ok(stmt),
+        Statement::Select(expr) => Ok(Statement::Select(resolve_views_for_sql(expr, tx, auth)?)),
+    }
 }
 
 /// A utility for executing a sql select statement

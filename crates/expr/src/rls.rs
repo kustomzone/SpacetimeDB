@@ -108,7 +108,7 @@ pub fn resolve_views(
 ///
 /// However, a `None` value implies that this expression is a user query,
 /// and so we should attempt to expand references to the return table.
-fn resolve_views_for_expr(
+pub fn resolve_views_for_expr(
     tx: &impl SchemaView,
     view: RelExpr,
     return_table_id: Option<TableId>,

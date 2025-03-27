@@ -5345,6 +5345,7 @@ version = "1.0.1"
 dependencies = [
  "anyhow",
  "derive_more",
+ "either",
  "pretty_assertions",
  "spacetimedb-expr",
  "spacetimedb-lib",

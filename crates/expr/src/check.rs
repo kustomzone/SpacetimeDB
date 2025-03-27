@@ -167,9 +167,9 @@ pub fn parse_and_type_sub(sql: &str, tx: &impl SchemaView, auth: &AuthCtx) -> Ty
 /// Returns an error if the input type is not a table type or relvar
 fn expect_table_type(expr: ProjectList) -> TypingResult<ProjectName> {
     match expr {
-        ProjectList::Name(proj) => Ok(proj),
+        ProjectList::Name(mut proj) if proj.len() == 1 => Ok(proj.pop().unwrap()),
         ProjectList::Limit(input, _) => expect_table_type(*input),
-        ProjectList::List(..) | ProjectList::Agg(..) => Err(Unsupported::ReturnType.into()),
+        ProjectList::Name(..) | ProjectList::List(..) | ProjectList::Agg(..) => Err(Unsupported::ReturnType.into()),
     }
 }
 

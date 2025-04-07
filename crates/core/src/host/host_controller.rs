@@ -20,10 +20,11 @@ use durability::{Durability, EmptyHistory};
 use log::{info, trace, warn};
 use parking_lot::{Mutex, RwLock};
 use spacetimedb_data_structures::map::IntMap;
-use spacetimedb_durability::{self as durability, TxOffset};
+use spacetimedb_durability::{self as durability};
 use spacetimedb_lib::hash_bytes;
 use spacetimedb_paths::server::{ReplicaDir, ServerDataDir};
 use spacetimedb_sats::hash::Hash;
+use spacetimedb_snapshot::TxOffset;
 use std::future::Future;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -710,7 +711,7 @@ impl Host {
             db::Storage::Disk => {
                 let snapshot_repo =
                     relational_db::open_snapshot_repo(replica_dir.snapshots(), database.database_identity, replica_id)?;
-                let (history, _) = relational_db::local_durability(replica_dir.commit_log()).await?;
+                let (history, _) = relational_db::local_durability(replica_dir.clone()).await?;
                 let (durability, start_snapshot_watcher) = durability.durability(replica_id).await?;
 
                 let (db, clients) = RelationalDB::open(

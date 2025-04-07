@@ -35,14 +35,13 @@ use anyhow::{anyhow, Context};
 use core::{cell::RefCell, ops::RangeBounds};
 use parking_lot::{Mutex, RwLock};
 use spacetimedb_commitlog::payload::{txdata, Txdata};
-use spacetimedb_durability::TxOffset;
 use spacetimedb_lib::{db::auth::StAccess, metrics::ExecutionMetrics};
 use spacetimedb_lib::{ConnectionId, Identity};
 use spacetimedb_paths::server::SnapshotDirPath;
 use spacetimedb_primitives::{ColList, ConstraintId, IndexId, SequenceId, TableId};
 use spacetimedb_sats::{bsatn, buffer::BufReader, AlgebraicValue, ProductValue};
 use spacetimedb_schema::schema::{IndexSchema, SequenceSchema, TableSchema};
-use spacetimedb_snapshot::{ReconstructedSnapshot, SnapshotRepository};
+use spacetimedb_snapshot::{ReconstructedSnapshot, SnapshotRepository, TxOffset};
 use spacetimedb_table::{
     indexes::RowPointer,
     table::{RowRef, Table},

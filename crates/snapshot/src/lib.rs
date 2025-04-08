@@ -935,8 +935,6 @@ impl SnapshotRepository {
     }
 
     /// Compress the snapshots at the offsets provided, marking them as immutable.
-    ///
-    /// *NOTE*: Except the current snapshot
     pub fn compress_snapshots(root: &SnapshotsPath, offsets: &[TxOffset]) -> Result<CompressCount, SnapshotError> {
         let mut snapshots: Vec<_> = offsets
             .iter()

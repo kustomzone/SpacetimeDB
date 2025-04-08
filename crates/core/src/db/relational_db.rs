@@ -2682,8 +2682,11 @@ mod tests {
         stdb.release_tx(read_tx);
     }
 
-    // Verify that we can compress snapshots and hardlink them.
-    // then, verify that we can read the compressed snapshot.
+    // Verify that we can compress snapshots and hardlink them,
+    // except for the last one, which should be uncompressed.
+    // Then, verify that we can read the compressed snapshot.
+    //
+    // NOTE: `snapshot_watching_compressor` is what filter out the last snapshot
     #[test]
     fn compress_snapshot_test() -> ResultTest<()> {
         let stdb = TestDB::in_memory()?;
@@ -2701,14 +2704,15 @@ mod tests {
         stdb.take_snapshot(&repo)?;
 
         let total_objects = repo.size_on_disk()?.object_count;
-        // Another snapshot that will hardlink part of the first one
-        let mut tx = stdb.begin_mut_tx(IsolationLevel::Serializable, Workload::ForTests);
-        for v in 0..10 {
-            insert(&stdb, &mut tx, table_id, &product![v])?;
+        // Another snapshots that will hardlink part of the first one
+        for i in 0..2 {
+            let mut tx = stdb.begin_mut_tx(IsolationLevel::Serializable, Workload::ForTests);
+            for v in 0..(10 + i) {
+                insert(&stdb, &mut tx, table_id, &product![v])?;
+            }
+            stdb.commit_tx(tx)?;
+            stdb.take_snapshot(&repo)?;
         }
-        stdb.commit_tx(tx)?;
-
-        stdb.take_snapshot(&repo)?;
 
         let size_compress_off = repo.size_on_disk()?;
         assert!(
@@ -2717,23 +2721,25 @@ mod tests {
         );
         let mut offsets = repo.all_snapshots()?.collect::<Vec<_>>();
         offsets.sort();
-        assert_eq!(&offsets, &[1, 2]);
+        assert_eq!(&offsets, &[1, 2, 3]);
+        // Simulate we take except the last snapshot
         assert_eq!(
-            SnapshotRepository::compress_snapshots(&dir, &offsets)?,
+            SnapshotRepository::compress_snapshots(&dir, &offsets[..2])?,
             CompressCount { none: 0, zstd: 2 }
         );
         let size_compress_on = repo.size_on_disk()?;
 
         assert!(size_compress_on.total_size < size_compress_off.total_size);
-
+        let last_compress = offsets[1];
         // Verify we hard-linked the second snapshot
         #[cfg(unix)]
         {
-            let snapshot_dir = dir.snapshot_dir(offsets[1]);
+            let snapshot_dir = dir.snapshot_dir(last_compress);
             let mut hard_linked_on = 0;
             let mut hard_linked_off = 0;
 
-            let (snapshot, _) = Snapshot::read_from_file(&snapshot_dir.snapshot_file(offsets[1]))?;
+            let (snapshot, compress) = Snapshot::read_from_file(&snapshot_dir.snapshot_file(last_compress))?;
+            assert_eq!(compress, CompressType::Zstd);
             let repo = SnapshotRepository::object_repo(&snapshot_dir)?;
             for (_, path) in snapshot.files(&repo) {
                 match path.metadata()?.nlink() {
@@ -2747,8 +2753,7 @@ mod tests {
 
         // Sanity check that we can read the snapshot after compression
         let repo = open_snapshot_repo(dir, Identity::ZERO, 0)?;
-        let last = repo.latest_snapshot()?;
-        RelationalDB::restore_from_snapshot_or_bootstrap(Identity::ZERO, Some(&repo), last)?;
+        RelationalDB::restore_from_snapshot_or_bootstrap(Identity::ZERO, Some(&repo), Some(last_compress))?;
 
         Ok(())
     }
